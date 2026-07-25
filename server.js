@@ -112,8 +112,61 @@ async function mirrorToBackupChannel(messageId) {
   }
 }
 
+// --- raw body parser middleware to handle simple uploads from MacroDroid without multipart ---
+const rawBodyParser = (req, res, next) => {
+  const contentType = req.headers["content-type"] || "";
+  
+  if (contentType.includes("multipart/form-data")) {
+    return upload.single("file")(req, res, next);
+  }
+  
+  const isBinary = contentType.startsWith("image/") || 
+                   contentType.startsWith("video/") || 
+                   contentType.startsWith("application/octet-stream");
+                   
+  if (!isBinary) {
+    return next();
+  }
+  
+  const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const filePath = path.join(TMP_DIR, filename);
+  const writeStream = fs.createWriteStream(filePath);
+  
+  let sizeBytes = 0;
+  req.on("data", (chunk) => {
+    sizeBytes += chunk.length;
+  });
+  
+  req.pipe(writeStream);
+  
+  writeStream.on("finish", () => {
+    let originalname = `upload-${Date.now()}`;
+    const disposition = req.headers["content-disposition"];
+    if (disposition) {
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match) originalname = match[1];
+    } else {
+      const ext = contentType.split("/")[1] || "bin";
+      originalname = `${originalname}.${ext}`;
+    }
+    
+    req.file = {
+      path: filePath,
+      originalname: originalname,
+      mimetype: contentType,
+      size: sizeBytes
+    };
+    next();
+  });
+  
+  writeStream.on("error", (err) => {
+    console.error("Raw body upload write error:", err);
+    res.status(500).json({ error: "Failed to save raw upload" });
+  });
+};
+
 // --- upload a photo or video straight to your private Telegram channel ---
-app.post("/api/upload", upload.single("file"), async (req, res) => {
+app.post("/api/upload", rawBodyParser, async (req, res) => {
   const cleanupPaths = [];
   try {
     if (!req.file) return res.status(400).json({ error: "No file provided" });
@@ -139,7 +192,9 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const form = new FormData();
     form.append("chat_id", CHANNEL_ID);
     form.append(fieldName, fs.createReadStream(sendPath), { filename: req.file.originalname });
-    if (req.body.caption) form.append("caption", req.body.caption);
+    
+    const caption = req.body?.caption || req.query.caption || "";
+    if (caption) form.append("caption", caption);
 
     const tgRes = await axios.post(`${API}/${method}`, form, {
       headers: form.getHeaders(),
@@ -172,11 +227,11 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       id: `${result.message_id}`,
       type: isVideo ? "video" : isImage ? "photo" : "document",
       fileId,
-      album: req.body.album || "Uploads",
+      album: req.body?.album || req.query.album || "Uploads",
       filename: req.file.originalname,
       mimetype: req.file.mimetype,
       sizeBytes,
-      caption: req.body.caption || "",
+      caption,
       compressed: wasCompressed,
       width,
       height,
