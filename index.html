@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Archive — Private Gallery</title>
+<meta name="description" content="Your private, off-device photo and file archive backed by Telegram." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- mobile menu overlay backdrop -->
+<div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+<!-- ══════════════ SIDEBAR ══════════════ -->
+<aside id="sidebar" class="sidebar">
+  <div class="sidebar-header">
+    <div class="brand">
+      <span class="brand-mark">◈</span>
+      <div>
+        <h1>ARCHIVE</h1>
+        <p class="subtitle">private vault</p>
+      </div>
+    </div>
+    <button id="sidebar-close" class="sidebar-close-btn" aria-label="Close menu">✕</button>
+  </div>
+
+  <div class="sidebar-stats">
+    <div class="stat-pill" id="stat-frames"><span class="stat-num" id="stat-frames-num">0</span><span class="stat-label">frames</span></div>
+    <div class="stat-pill" id="stat-files"><span class="stat-num" id="stat-files-num">0</span><span class="stat-label">files</span></div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <!-- Gallery section -->
+    <div class="nav-section-label">Gallery</div>
+    <button class="nav-item active" id="nav-all" data-section="gallery" data-album="All">
+      <span class="nav-icon">🖼️</span> All Photos
+    </button>
+    <button class="nav-item" id="nav-camera" data-section="gallery" data-album="Camera">
+      <span class="nav-icon">📷</span> Camera
+    </button>
+    <button class="nav-item" id="nav-screenshots" data-section="gallery" data-album="Screenshots">
+      <span class="nav-icon">🖥️</span> Screenshots
+    </button>
+    <button class="nav-item" id="nav-whatsapp-img" data-section="gallery" data-album="WhatsApp Images">
+      <span class="nav-icon">💬</span> WhatsApp Images
+    </button>
+    <button class="nav-item" id="nav-whatsapp-vid" data-section="gallery" data-album="WhatsApp Video">
+      <span class="nav-icon">🎞️</span> WhatsApp Video
+    </button>
+    <button class="nav-item" id="nav-downloads" data-section="gallery" data-album="Downloads">
+      <span class="nav-icon">⬇️</span> Downloads
+    </button>
+
+    <!-- Files section -->
+    <div class="nav-section-label" style="margin-top: 18px;">Files</div>
+    <button class="nav-item" id="nav-files" data-section="files">
+      <span class="nav-icon">📁</span> File Browser
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <button id="backup-btn" class="sidebar-action-btn backup-btn">
+      <span>⤓</span> Backup Archive
+    </button>
+    <button id="logout-btn" class="sidebar-action-btn logout-btn-sf">
+      <span>→</span> Sign Out
+    </button>
+  </div>
+</aside>
+
+<!-- ══════════════ MAIN CONTENT ══════════════ -->
+<div class="main-wrapper">
+
+  <!-- top bar (mobile menu toggle + breadcrumbs) -->
+  <header class="topbar">
+    <button id="menu-toggle" class="menu-toggle" aria-label="Open menu">☰</button>
+    <div id="breadcrumbs" class="breadcrumbs">
+      <span class="breadcrumb active">All Photos</span>
+    </div>
+    <button id="fab" class="fab" aria-label="Upload">+</button>
+  </header>
+
+  <!-- status bar -->
+  <div id="upload-status" class="upload-status" hidden></div>
+
+  <!-- ── GALLERY VIEW ── -->
+  <main id="gallery-view" class="content-view">
+    <div id="grid-container"></div>
+    <div id="empty-state" class="empty-state" hidden>
+      <div class="empty-icon">🎞️</div>
+      <p>No frames yet.</p>
+      <p class="muted">Tap <strong>+</strong> to upload a photo or video — it lands straight in your private Telegram channel.</p>
+    </div>
+  </main>
+
+  <!-- ── FILES VIEW ── -->
+  <main id="files-view" class="content-view" hidden>
+    <!-- toolbar -->
+    <div class="files-toolbar">
+      <nav id="files-breadcrumb" class="files-breadcrumb">
+        <button class="bc-item active" data-path="">📁 Files</button>
+      </nav>
+      <button id="new-folder-btn" class="toolbar-btn">
+        <span>+</span> New Folder
+      </button>
+    </div>
+    <!-- folder grid -->
+    <div id="folder-grid" class="folder-grid"></div>
+    <!-- file list inside a folder -->
+    <div id="file-list-container" class="file-list-container"></div>
+    <div id="files-empty-state" class="empty-state" hidden>
+      <div class="empty-icon">📂</div>
+      <p>Empty folder.</p>
+      <p class="muted">Upload files here using the <strong>+</strong> button.</p>
+    </div>
+  </main>
+
+</div><!-- /.main-wrapper -->
+
+<!-- ══════════════ UPLOAD MODAL ══════════════ -->
+<div id="upload-modal" class="modal-overlay" hidden>
+  <form id="upload-form" class="modal-card">
+    <div class="modal-header">
+      <h2>Add to Archive</h2>
+      <button type="button" id="modal-cancel" class="modal-x-btn" aria-label="Close">✕</button>
+    </div>
+    <label class="file-drop" id="file-drop">
+      <input type="file" id="file-input" hidden />
+      <span class="file-drop-icon">📎</span>
+      <span id="file-label">Choose a photo, video, or document</span>
+    </label>
+
+    <label class="modal-field" id="album-field">
+      <span>Album</span>
+      <select id="album-select">
+        <option value="Camera">📷 Camera</option>
+        <option value="Screenshots">🖥️ Screenshots</option>
+        <option value="WhatsApp Images">💬 WhatsApp Images</option>
+        <option value="WhatsApp Video">🎞️ WhatsApp Video</option>
+        <option value="Downloads">⬇️ Downloads</option>
+        <option value="Uploads">📤 Other</option>
+      </select>
+    </label>
+
+    <label class="modal-field" id="folder-field" hidden>
+      <span>Folder</span>
+      <input type="text" id="folder-input" list="folder-options" placeholder="Type folder name…" autocomplete="off" />
+      <datalist id="folder-options"></datalist>
+    </label>
+
+    <label class="modal-field">
+      <span>Caption (optional)</span>
+      <input type="text" id="caption-input" placeholder="A few words…" maxlength="120" />
+    </label>
+    <div class="modal-actions">
+      <button type="button" id="modal-cancel-2" class="btn-ghost">Cancel</button>
+      <button type="submit" id="upload-btn" class="btn-solid">Upload</button>
+    </div>
+  </form>
+</div>
+
+<!-- ══════════════ NEW FOLDER MODAL ══════════════ -->
+<div id="new-folder-modal" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>New Folder</h2>
+      <button type="button" id="new-folder-cancel-x" class="modal-x-btn" aria-label="Close">✕</button>
+    </div>
+    <label class="modal-field">
+      <span>Folder Name</span>
+      <input type="text" id="new-folder-name" placeholder="e.g. Tax Documents" maxlength="60" autocomplete="off" />
+    </label>
+    <div class="modal-actions">
+      <button type="button" id="new-folder-cancel" class="btn-ghost">Cancel</button>
+      <button type="button" id="new-folder-create" class="btn-solid">Create Folder</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ BACKUP MODAL ══════════════ -->
+<div id="backup-modal" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <h2>Backup Archive</h2>
+      <button type="button" id="backup-cancel-x" class="modal-x-btn" aria-label="Close">✕</button>
+    </div>
+    <p class="modal-description">This will download everything in your archive as a single <strong>.zip</strong> file — your own independent copy, stored wherever you save it.</p>
+    <div class="backup-warning">
+      ⚠️ Keep this tab open until the download finishes. Large archives with videos may take several minutes.
+    </div>
+    <label class="modal-checkbox-field">
+      <input type="checkbox" id="exclude-videos-check" />
+      <div>
+        <span class="checkbox-label">Exclude videos</span>
+        <span class="checkbox-sub">Smaller download — photos and documents only.</span>
+      </div>
+    </label>
+    <div class="modal-actions">
+      <button type="button" id="backup-cancel" class="btn-ghost">Cancel</button>
+      <button type="button" id="backup-confirm" class="btn-solid">⤓ Start Download</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ DELETE CONFIRM MODAL ══════════════ -->
+<div id="delete-modal" class="modal-overlay" hidden>
+  <div class="modal-card modal-card-sm">
+    <div class="modal-header">
+      <h2>Remove from list?</h2>
+    </div>
+    <p class="modal-description">This removes the item from your gallery list. The file itself stays safe in your Telegram channel.</p>
+    <div class="modal-actions">
+      <button type="button" id="delete-cancel" class="btn-ghost">Cancel</button>
+      <button type="button" id="delete-confirm" class="btn-danger">Remove</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ LIGHTBOX ══════════════ -->
+<div id="lightbox" class="lightbox" hidden>
+  <button id="lightbox-close" class="lightbox-close" aria-label="Close">✕</button>
+  <button id="lightbox-prev" class="lightbox-nav prev" aria-label="Previous">‹</button>
+  <div id="lightbox-content" class="lightbox-content"></div>
+  <button id="lightbox-next" class="lightbox-nav next" aria-label="Next">›</button>
+  <p id="lightbox-caption" class="lightbox-caption"></p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

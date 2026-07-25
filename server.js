@@ -68,6 +68,12 @@ app.post("/api/logout", (req, res) => {
   res.json({ ok: true });
 });
 
+// --- keep-alive ping: no auth required, no processing, just wakes Render up ---
+// MacroDroid calls this every 10 minutes so the server is always warm and ready.
+app.get("/api/ping", (req, res) => {
+  res.json({ ok: true, ts: Date.now() });
+});
+
 // --- everything under /api (except the two routes above) needs either the
 // session cookie (browser, after logging in) or Basic Auth (MacroDroid's
 // automated uploads, which can't use a login page) ---
@@ -171,6 +177,20 @@ app.post("/api/upload", rawBodyParser, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file provided" });
     cleanupPaths.push(req.file.path);
+
+    // --- duplicate detection: skip files already in the DB (same filename) ---
+    // This lets MacroDroid safely re-send the entire Camera folder on every sync
+    // cycle without creating duplicates. Already-uploaded files are silently skipped.
+    const existingItems = await readDb();
+    const filename = req.file.originalname;
+    const album = req.body?.album || req.query.album || "Uploads";
+    const duplicate = existingItems.find(
+      (i) => i.filename === filename && (i.album || "Uploads") === album
+    );
+    if (duplicate) {
+      console.log(`Skipping duplicate: ${filename} (already in ${album})`);
+      return res.json({ ok: true, duplicate: true, item: duplicate });
+    }
 
     const isVideo = req.file.mimetype.startsWith("video/");
     const isImage = req.file.mimetype.startsWith("image/");
@@ -325,7 +345,13 @@ function appendToArchive(archive, item) {
 }
 
 app.get("/api/backup", async (req, res) => {
-  const items = await readDb();
+  const excludeVideos = req.query.excludeVideos === "true";
+  let items = await readDb();
+  // Filter out video items if requested
+  if (excludeVideos) items = items.filter(i => i.type !== "video");
+  // Skip folder marker items (no real file to download)
+  items = items.filter(i => i.type !== "folder" && i.fileId);
+
   const filename = `archive-backup-${new Date().toISOString().slice(0, 10)}.zip`;
   res.setHeader("Content-Type", "application/zip");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -341,6 +367,26 @@ app.get("/api/backup", async (req, res) => {
     await appendToArchive(archive, item);
   }
   await archive.finalize();
+});
+
+// --- create an empty folder marker (lightweight; no Telegram upload needed) ---
+app.post("/api/folders", async (req, res) => {
+  const name = (req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Folder name is required" });
+  const items = await readDb();
+  // Avoid duplicate folder names
+  if (items.some(i => i.type === "folder" && i.album === name)) {
+    return res.status(409).json({ error: "A folder with that name already exists" });
+  }
+  const entry = {
+    id: `folder-${Date.now()}`,
+    type: "folder",
+    album: name,
+    uploadedAt: new Date().toISOString()
+  };
+  items.unshift(entry);
+  await writeDb(items);
+  res.json({ ok: true, folder: entry });
 });
 
 app.listen(PORT, () => {
