@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Archive — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+<style>
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 30px 70px rgba(0,0,0,0.6);
+    padding: 36px 30px;
+    width: 100%;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    gap: 17px;
+    position: relative;
+    overflow: hidden;
+    z-index: 2;
+    animation: fadeScale 0.3s var(--ease);
+  }
+  .login-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-bright));
+  }
+  .login-brand { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 6px; }
+  .login-brand span { color: var(--accent-bright); font-size: 24px; text-shadow: 0 0 18px var(--accent-glow); }
+  .login-brand h1 { margin: 0; font-family: var(--serif); font-style: italic; font-weight: 500; font-size: 24px; color: var(--text); }
+  .login-field { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--text-muted); letter-spacing: 0.04em; }
+  .login-field input {
+    font-family: var(--mono); font-size: 13px; background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 11px 13px;
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  }
+  .login-field input:focus { outline: none; border-color: var(--accent-bright); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .remember-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+  .remember-row input { accent-color: var(--accent-bright); }
+  .login-error { font-size: 12px; color: var(--accent-bright); min-height: 14px; }
+  .login-submit {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.05em;
+    background: linear-gradient(135deg, var(--accent), var(--accent-bright));
+    color: #fff; border: none; border-radius: 999px;
+    padding: 13px; cursor: pointer;
+    box-shadow: 0 6px 18px var(--accent-glow);
+    transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  }
+  .login-submit:hover { transform: translateY(-1px); box-shadow: 0 8px 22px var(--accent-glow); }
+  .login-submit:disabled { opacity: 0.5; cursor: default; transform: none; }
+</style>
+</head>
+<body>
+
+<form id="login-form" class="login-card">
+  <div class="login-brand">
+    <span>◈</span>
+    <h1>ARCHIVE</h1>
+  </div>
+  <label class="login-field">
+    <span>Username</span>
+    <input type="text" id="username" autocomplete="username" required />
+  </label>
+  <label class="login-field">
+    <span>Password</span>
+    <input type="password" id="password" autocomplete="current-password" required />
+  </label>
+  <div class="remember-row">
+    <input type="checkbox" id="remember" checked />
+    <label for="remember">Keep me signed in for 30 days</label>
+  </div>
+  <p id="login-error" class="login-error"></p>
+  <button type="submit" id="login-submit" class="login-submit">Sign in</button>
+</form>
+
+<script src="login.js"></script>
+</body>
+</html>
