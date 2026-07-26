@@ -10,6 +10,23 @@ const path = require("path");
 const { readDb, writeDb, usingUpstash } = require("./storage");
 const { ensureUnderLimit } = require("./compress");
 
+// ── Concurrency guards ─────────────────────────────────────────────
+// 1) Per-file in-flight lock: if two requests for the same filename+album
+//    arrive at the same time (Termux retry, MacroDroid re-sync, etc.),
+//    the second one waits for the first to finish and then sees it in the
+//    DB, so it gets deduplicated instead of creating a duplicate.
+const inflightUploads = new Map(); // key → Promise
+
+// 2) DB write lock: serialises all readDb→mutate→writeDb sequences so
+//    concurrent uploads can't overwrite each other (lost-write bug that
+//    made some photos silently vanish from the gallery).
+let dbLockChain = Promise.resolve();
+function withDbLock(fn) {
+  const next = dbLockChain.then(fn, fn); // always release even on error
+  dbLockChain = next.catch(() => {});     // swallow so chain never rejects
+  return next;
+}
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 // Optional: a second private channel every upload gets mirrored into
@@ -128,7 +145,10 @@ const rawBodyParser = (req, res, next) => {
   
   const isBinary = contentType.startsWith("image/") || 
                    contentType.startsWith("video/") || 
-                   contentType.startsWith("application/octet-stream");
+                   contentType.startsWith("audio/") ||
+                   (contentType.startsWith("application/") &&
+                    !contentType.includes("json") &&
+                    !contentType.includes("x-www-form-urlencoded"));
                    
   if (!isBinary) {
     return next();
@@ -173,22 +193,38 @@ const rawBodyParser = (req, res, next) => {
 
 // --- upload a photo or video straight to your private Telegram channel ---
 app.post("/api/upload", rawBodyParser, async (req, res) => {
-  const cleanupPaths = [];
-  try {
-    if (!req.file) return res.status(400).json({ error: "No file provided" });
-    cleanupPaths.push(req.file.path);
+  if (!req.file) return res.status(400).json({ error: "No file provided" });
 
-    // --- duplicate detection: skip files already in the DB (same filename) ---
-    // This lets MacroDroid safely re-send the entire Camera folder on every sync
-    // cycle without creating duplicates. Already-uploaded files are silently skipped.
+  const filename = req.file.originalname;
+  const album = req.body?.album || req.query.album || "Uploads";
+  const lockKey = `${album}::${filename}`;
+
+  // ── Per-file concurrency gate ──────────────────────────────
+  // If the same file is already being uploaded (Termux retry, slow
+  // connection, MacroDroid re-sync), wait for the first request to
+  // finish, then re-check the DB — the first one will have written
+  // the entry, so this request becomes a harmless duplicate skip.
+  if (inflightUploads.has(lockKey)) {
+    console.log(`Waiting for in-flight upload to finish: ${lockKey}`);
+    try { await inflightUploads.get(lockKey); } catch (_) { /* first failed, we'll retry */ }
+  }
+
+  // Create a deferred promise that other concurrent requests for the
+  // same file can await.
+  let resolveLock, rejectLock;
+  const lockPromise = new Promise((res, rej) => { resolveLock = res; rejectLock = rej; });
+  inflightUploads.set(lockKey, lockPromise);
+
+  const cleanupPaths = [req.file.path];
+  try {
+    // ── Duplicate detection (pre-upload) ─────────────────────
     const existingItems = await readDb();
-    const filename = req.file.originalname;
-    const album = req.body?.album || req.query.album || "Uploads";
     const duplicate = existingItems.find(
       (i) => i.filename === filename && (i.album || "Uploads") === album
     );
     if (duplicate) {
       console.log(`Skipping duplicate: ${filename} (already in ${album})`);
+      resolveLock();
       return res.json({ ok: true, duplicate: true, item: duplicate });
     }
 
@@ -219,7 +255,8 @@ app.post("/api/upload", rawBodyParser, async (req, res) => {
     const tgRes = await axios.post(`${API}/${method}`, form, {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
-      maxBodyLength: Infinity
+      maxBodyLength: Infinity,
+      timeout: 120000 // 2 min timeout – generous for big files on mobile
     });
 
     const result = tgRes.data.result;
@@ -242,33 +279,54 @@ app.post("/api/upload", rawBodyParser, async (req, res) => {
       sizeBytes = result.document.file_size;
     }
 
-    const items = await readDb();
-    const entry = {
-      id: `${result.message_id}`,
-      type: isVideo ? "video" : isImage ? "photo" : "document",
-      fileId,
-      album: req.body?.album || req.query.album || "Uploads",
-      filename: req.file.originalname,
-      mimetype: req.file.mimetype,
-      sizeBytes,
-      caption,
-      compressed: wasCompressed,
-      width,
-      height,
-      uploadedAt: new Date().toISOString()
-    };
-    items.unshift(entry);
-    await writeDb(items);
-    await mirrorToBackupChannel(result.message_id);
+    // ── Atomic DB write (locked) ─────────────────────────────
+    // Re-read the DB inside a lock to avoid lost writes when multiple
+    // uploads finish at the same time, and re-check duplicates as a
+    // safety net (belt-and-suspenders with the in-flight gate above).
+    const entry = await withDbLock(async () => {
+      const items = await readDb();
 
+      // Re-check duplicate inside the lock — another request may have
+      // finished and written this same file while we were uploading.
+      const dup = items.find(
+        (i) => i.filename === filename && (i.album || "Uploads") === album
+      );
+      if (dup) {
+        console.log(`Post-upload duplicate caught: ${filename}`);
+        return dup; // return existing entry, don't double-write
+      }
+
+      const newEntry = {
+        id: `${result.message_id}`,
+        type: isVideo ? "video" : isImage ? "photo" : "document",
+        fileId,
+        album,
+        filename: req.file.originalname,
+        mimetype: req.file.mimetype,
+        sizeBytes,
+        caption,
+        compressed: wasCompressed,
+        width,
+        height,
+        uploadedAt: new Date().toISOString()
+      };
+      items.unshift(newEntry);
+      await writeDb(items);
+      return newEntry;
+    });
+
+    await mirrorToBackupChannel(result.message_id);
+    resolveLock();
     res.json({ ok: true, item: entry });
   } catch (err) {
+    rejectLock(err);
     console.error(err.response?.data || err.message);
     res.status(err.message?.includes("too large") ? 413 : 500).json({
       error: err.response?.data ? "Upload failed" : err.message,
       detail: err.response?.data
     });
   } finally {
+    inflightUploads.delete(lockKey);
     for (const p of cleanupPaths) {
       fs.unlink(p, () => {}); // best-effort cleanup, ignore errors
     }
