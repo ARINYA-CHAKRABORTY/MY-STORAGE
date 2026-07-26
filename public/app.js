@@ -451,34 +451,48 @@ document.getElementById('delete-confirm').onclick = async () => {
 
 // ── Upload Modal ──────────────────────────────────
 function openModal() {
-  // pre-fill folder if inside a folder in files section
+  // Reset form state first
+  uploadForm.reset();
+  fileLabel.textContent = 'Choose a photo, video, or document';
+
+  // If inside a folder in files section, pre-fill and show the folder field
   if (section === 'files' && activeFolder) {
     folderInput.value = activeFolder;
     albumField.hidden = true;
     folderField.hidden = false;
+  } else {
+    // Default: show album selector, hide folder field
+    albumField.hidden = false;
+    folderField.hidden = true;
   }
   uploadModal.hidden = false;
 }
 function closeModal() {
   uploadModal.hidden = true;
-  uploadForm.reset();
-  fileLabel.textContent = 'Choose a photo, video, or document';
-  albumField.hidden = false;
-  folderField.hidden = true;
+  // Don't reset the form here — values are captured before close during
+  // submit. Reset happens in openModal() instead so fresh opens are clean.
 }
 
 document.getElementById('fab').onclick = openModal;
-document.getElementById('modal-cancel').onclick   = closeModal;
-document.getElementById('modal-cancel-2').onclick = closeModal;
-uploadModal.addEventListener('click', e => { if (e.target === uploadModal) closeModal(); });
+document.getElementById('modal-cancel').onclick   = () => { closeModal(); uploadForm.reset(); };
+document.getElementById('modal-cancel-2').onclick = () => { closeModal(); uploadForm.reset(); };
+uploadModal.addEventListener('click', e => { if (e.target === uploadModal) { closeModal(); uploadForm.reset(); } });
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files[0];
   fileLabel.textContent = file ? file.name : 'Choose a photo, video, or document';
   if (!file) return;
   const isMedia = file.type.startsWith('image/') || file.type.startsWith('video/');
-  albumField.hidden = !isMedia;
-  folderField.hidden = isMedia;
+  // When user picks a document (PDF, etc.), switch to folder picker;
+  // when they pick a photo/video, switch back to album selector.
+  // But if we're inside a folder in files view, always keep folder field visible.
+  if (section === 'files' && activeFolder) {
+    albumField.hidden = true;
+    folderField.hidden = false;
+  } else {
+    albumField.hidden = !isMedia;
+    folderField.hidden = isMedia;
+  }
 });
 
 uploadForm.addEventListener('submit', async e => {
@@ -487,14 +501,23 @@ uploadForm.addEventListener('submit', async e => {
   if (!file) return;
   const isMedia = file.type.startsWith('image/') || file.type.startsWith('video/');
 
+  // ── Capture ALL form values BEFORE closing the modal ──
+  // closeModal() used to call uploadForm.reset() which wiped album/folder/
+  // caption before they were read — the root cause of files always landing
+  // in "General" or "Camera" and captions being lost.
+  const selectedAlbum   = albumSelect.value;
+  const selectedFolder  = folderInput.value.trim() || 'General';
+  const selectedCaption = captionInput.value;
+  const album = isMedia ? selectedAlbum : selectedFolder;
+
   uploadBtn.disabled = true;
   showStatus(`Uploading ${file.name}…`, false);
   closeModal();
 
   const form = new FormData();
   form.append('file', file);
-  form.append('album', isMedia ? albumSelect.value : (folderInput.value.trim() || 'General'));
-  form.append('caption', captionInput.value);
+  form.append('album', album);
+  form.append('caption', selectedCaption);
 
   if (isDemoMode) {
     setTimeout(() => {
@@ -502,9 +525,9 @@ uploadForm.addEventListener('submit', async e => {
       items.unshift({
         id: `demo-${Date.now()}`,
         type: file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'photo' : 'document',
-        fileId: '', album: isMedia ? albumSelect.value : (folderInput.value.trim() || 'General'),
+        fileId: '', album,
         filename: file.name, mimetype: file.type, sizeBytes: file.size,
-        caption: captionInput.value, demoUrl, uploadedAt: new Date().toISOString()
+        caption: selectedCaption, demoUrl, uploadedAt: new Date().toISOString()
       });
       showStatus('Uploaded (demo mode).', false);
       loadMedia();
@@ -518,7 +541,7 @@ uploadForm.addEventListener('submit', async e => {
     const res  = await fetch('/api/upload', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Upload failed');
-    showStatus('✓ Uploaded successfully!', false);
+    showStatus(data.duplicate ? '⊘ Already uploaded (skipped)' : '✓ Uploaded successfully!', false);
     await loadMedia();
     setTimeout(() => { uploadStatus.hidden = true; }, 2500);
   } catch (err) {
